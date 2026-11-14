@@ -1,0 +1,185 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+enum InterviewType {
+  HR_BEHAVIOURAL
+  RESUME_DEEP_DIVE
+  DSA_CODING
+  CS_FUNDAMENTALS
+}
+
+enum CompanyType {
+  SERVICE_BASED
+  PRODUCT_BASED
+  STARTUP
+  GENERAL
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum InterviewStatus {
+  SETUP
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum MessageRole {
+  INTERVIEWER
+  CANDIDATE
+  SYSTEM
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  passwordHash  String
+  name          String
+  role          Role            @default(STUDENT)
+  resumes       Resume[]
+  interviews    Interview[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([email])
+}
+
+model Resume {
+  id               String      @id @default(cuid())
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileSize         Int
+  rawText          String      @db.Text
+  parsedSkills     String[]
+  parsedProjects   Json        // Array of { title, description, techStack, highlights }
+  parsedExperience Json        // Array of { role, company, duration, responsibilities }
+  education        Json?       // Degree, college, gradYear, gpa
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model Interview {
+  id                    String              @id @default(cuid())
+  userId                String
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                  InterviewType
+  targetRole            String              // e.g. "Software Engineer (SDE-1)"
+  companyType           CompanyType         @default(PRODUCT_BASED)
+  difficulty            Difficulty          @default(MEDIUM)
+  durationMinutes       Int                 @default(30)
+  status                InterviewStatus     @default(SETUP)
+  
+  // Coding Round Context
+  codingLanguage        String?             // "javascript" | "python"
+  problemStatement      String?             @db.Text
+  starterCode           String?             @db.Text
+  submittedCode         String?             @db.Text
+  codeExecutionOutput   String?             @db.Text
+
+  // Execution timings
+  startedAt             DateTime?
+  endedAt               DateTime?
+  totalDurationSeconds  Int?
+
+  // Relations
+  messages              TranscriptMessage[]
+  feedback              InterviewFeedback?
+
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([userId, status])
+  @@index([createdAt])
+}
+
+model TranscriptMessage {
+  id              String       @id @default(cuid())
+  interviewId     String
+  interview       Interview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  role            MessageRole
+  content         String       @db.Text
+  orderIndex      Int
+  
+  // Voice & Pacing Telemetry
+  durationMs      Int?         // Speech duration
+  pauseMs         Int?         // Silence/hesitation duration before answering
+  fillerWords     String[]     // e.g. ["um", "like", "you know"]
+  fillerWordCount Int          @default(0)
+  isCodeSnippet   Boolean      @default(false)
+
+  createdAt       DateTime     @default(now())
+
+  @@index([interviewId, orderIndex])
+}
+
+model InterviewFeedback {
+  id                      String      @id @default(cuid())
+  interviewId             String      @unique
+  interview               Interview   @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  
+  // Scores (1 - 100)
+  overallScore            Int
+  communicationScore      Int
+  technicalDepthScore     Int
+  problemSolvingScore     Int
+  structureScore          Int         // STAR compliance or logical structure
+  confidenceScore         Int         // Inverse of filler words and hesitations
+
+  // Granular Citing Evidence (Array of { criterion, scoreOutOf10, rationale, citedTranscriptLines: number[] })
+  criteriaScores          Json
+  
+  strengths               String[]    // List of 3-5 confirmed strengths with line citations
+  topImprovements         Json        // Array of { title, description, actionableTip, citedLine } (Top 3)
+  
+  weakestQuestion         String      @db.Text
+  weakestAnswerSnippet    String      @db.Text
+  betterSampleAnswer      String      @db.Text    // Exemplary model response adhering to STAR/Tech standards
+
+  createdAt               DateTime    @default(now())
+}
+
+model QuestionBank {
+  id              String          @id @default(cuid())
+  category        InterviewType
+  companyType     CompanyType     @default(GENERAL)
+  difficulty      Difficulty      @default(MEDIUM)
+  topic           String          // e.g. "Dynamic Programming", "Indexes & B-Trees", "System Design"
+  questionText    String          @db.Text
+  expectedPoints  String[]        // Key signals an interviewer looks for
+  hints           String[]        // Progressive hints
+  starterCode     String?         @db.Text
+  isApproved      Boolean         @default(true)
+  createdById     String?
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([category, companyType, difficulty])
+}
+
+model UsageMetric {
+  id          String   @id @default(cuid())
+  date        String   // YYYY-MM-DD
+  metricName  String   // e.g. "INTERVIEWS_COMPLETED", "USERS_REGISTERED", "CODE_EXECUTIONS"
+  count       Int      @default(0)
+
+  @@unique([date, metricName])
+}
